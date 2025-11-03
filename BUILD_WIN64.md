@@ -122,9 +122,47 @@ You should see entries for:
 
 ## Building the Static Libraries
 
-You can build the project using either **Visual Studio** or **Command Line**.
+You can build the project using either **Automated Scripts**, **Visual Studio**, or **Command Line**.
 
-### Option A: Building with Visual Studio
+### Option A: Using Automated Build Scripts (Recommended)
+
+For convenience, automated build scripts are provided:
+
+#### PowerShell Script (Recommended)
+
+```powershell
+# Build Release with VS2022 (v143 toolset) - Default
+.\build-win64.ps1
+
+# Build Debug with VS2019 (v142 toolset)
+.\build-win64.ps1 -Config Debug -Toolset v142
+
+# Build Release without examples and tests
+.\build-win64.ps1 -Config Release -BuildExamples:$false -BuildTests:$false
+```
+
+#### Batch Script
+
+```cmd
+REM Build Release with VS2022 (v143 toolset) - Default
+build-win64.bat
+
+REM Build Debug with VS2019 (v142 toolset)
+build-win64.bat Debug v142
+
+REM Build Release with VS2022 (v143 toolset)
+build-win64.bat Release v143
+```
+
+These scripts will:
+- Check all prerequisites
+- Initialize Git submodules if needed
+- Configure and build the project
+- Display helpful information about build outputs
+
+### Option B: Building with Visual Studio
+
+If you prefer to use the Visual Studio IDE:
 
 #### For Visual Studio 2019 (v142 toolset):
 
@@ -156,7 +194,7 @@ You can build the project using either **Visual Studio** or **Command Line**.
    - Select **Build → Build All** from the menu
    - Or press `Ctrl+Shift+B`
 
-### Option B: Building from Command Line
+### Option C: Building from Command Line
 
 #### For Visual Studio 2019 (v142 toolset):
 
