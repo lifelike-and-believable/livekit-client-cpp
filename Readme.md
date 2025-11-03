@@ -30,6 +30,18 @@ Because webrtc requires C++20.
 - [nlohmann_json](https://github.com/nlohmann/json) (as submodule by default)
 - [dr_libs](https://github.com/mackron/dr_libs) (as submodule by default for examples)
 
+## Building
+
+### Windows 64-bit
+
+For detailed step-by-step instructions on building static libraries for Windows 64-bit, see [BUILD_WIN64.md](./BUILD_WIN64.md).
+
+Quick start:
+1. Install Visual Studio 2019 or 2022 with C++ development tools
+2. Install vcpkg and set `VCPKG_ROOT` environment variable
+3. Clone this repository with submodules: `git clone --recurse-submodules <repo-url>`
+4. Build using Visual Studio or command line (see BUILD_WIN64.md for details)
+
 ## Examples
 
 See [examples](./examples/)
