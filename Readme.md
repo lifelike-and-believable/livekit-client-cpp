@@ -34,13 +34,20 @@ Because webrtc requires C++20.
 
 ### Windows 64-bit
 
-For detailed step-by-step instructions on building static libraries for Windows 64-bit, see [BUILD_WIN64.md](./BUILD_WIN64.md).
+📚 **Documentation**:
+- [QUICKSTART_WIN64.md](./QUICKSTART_WIN64.md) - Quick reference guide
+- [BUILD_WIN64.md](./BUILD_WIN64.md) - Complete step-by-step instructions
 
-Quick start:
-1. Install Visual Studio 2019 or 2022 with C++ development tools
-2. Install vcpkg and set `VCPKG_ROOT` environment variable
-3. Clone this repository with submodules: `git clone --recurse-submodules <repo-url>`
-4. Build using Visual Studio or command line (see BUILD_WIN64.md for details)
+**Quick start**:
+```powershell
+# Install prerequisites: Visual Studio 2019/2022, vcpkg, CMake, Git
+# Set VCPKG_ROOT environment variable
+
+# Clone and build
+git clone --recurse-submodules https://github.com/lifelike-and-believable/livekit-client-cpp.git
+cd livekit-client-cpp
+.\build-win64.ps1  # or build-win64.bat for cmd
+```
 
 ## Examples
 

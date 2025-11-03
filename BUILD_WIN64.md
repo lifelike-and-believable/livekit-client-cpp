@@ -2,6 +2,8 @@
 
 This guide provides step-by-step instructions for building the LiveKit C++ client SDK static libraries on Windows 64-bit.
 
+> 📋 **Quick Start**: If you're already familiar with C++ development on Windows, check out [QUICKSTART_WIN64.md](./QUICKSTART_WIN64.md) for a condensed version of this guide.
+
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)
