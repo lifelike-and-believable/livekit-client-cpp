@@ -72,6 +72,11 @@ This project uses **vcpkg** to manage C++ dependencies. The following dependenci
 
 3. Run the vcpkg bootstrap script:
    ```cmd
+   bootstrap-vcpkg.bat
+   ```
+   
+   Or in PowerShell:
+   ```powershell
    .\bootstrap-vcpkg.bat
    ```
 
