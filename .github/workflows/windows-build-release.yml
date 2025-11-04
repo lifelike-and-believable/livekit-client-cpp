@@ -35,7 +35,7 @@ jobs:
             $_ -notlike 'C:\mingw*'
           }
           "PATH=$($paths -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "INCLUDE=`nLIB=`nLIBPATH=`n" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # Do not clear INCLUDE/LIB/LIBPATH; MSVC/Windows SDK need these.
 
       - name: Verify toolchain
         shell: pwsh
