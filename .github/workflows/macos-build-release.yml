@@ -20,6 +20,9 @@ jobs:
     name: Build on macOS
     runs-on: macos-latest
     
+    permissions:
+      contents: read
+    
     strategy:
       matrix:
         config: [Debug, Release]

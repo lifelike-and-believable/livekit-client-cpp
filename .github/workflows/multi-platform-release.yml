@@ -24,6 +24,9 @@ jobs:
     name: Build Windows
     runs-on: [self-hosted, windows]
     
+    permissions:
+      contents: read
+    
     strategy:
       matrix:
         config: [Debug, Release]
@@ -95,6 +98,9 @@ jobs:
     name: Build Linux
     runs-on: ubuntu-latest
     
+    permissions:
+      contents: read
+    
     strategy:
       matrix:
         config: [Debug, Release]
@@ -155,6 +161,9 @@ jobs:
   build-macos:
     name: Build macOS
     runs-on: macos-latest
+    
+    permissions:
+      contents: read
     
     strategy:
       matrix:
