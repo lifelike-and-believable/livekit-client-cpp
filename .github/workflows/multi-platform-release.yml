@@ -207,7 +207,7 @@ jobs:
           cp -r include/* "$artifactDir/include/"
           [ -d "$buildDir/generated" ] && cp -r "$buildDir/generated"/* "$artifactDir/generated/"
           
-          find "$buildDir/examples" -type f -perm +111 -exec cp {} "$artifactDir/examples/" \;
+          find "$buildDir/examples" -type f -perm /111 -exec cp {} "$artifactDir/examples/" \;
           
           cp LICENSE Readme.md "$artifactDir/" 2>/dev/null || true
           echo "LiveKit Client C++ SDK - macOS ${{ matrix.arch }} - ${{ matrix.config }}" > "$artifactDir/VERSION.txt"

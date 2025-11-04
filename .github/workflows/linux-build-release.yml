@@ -142,7 +142,7 @@ jobs:
           fi
           
           # Copy documentation
-          cp README.md "$artifactDir/" 2>/dev/null || cp Readme.md "$artifactDir/" 2>/dev/null || true
+          cp Readme.md "$artifactDir/" 2>/dev/null || true
           cp LICENSE "$artifactDir/" 2>/dev/null || true
           
           # Create a VERSION.txt file with build info

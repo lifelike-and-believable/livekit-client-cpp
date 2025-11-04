@@ -149,7 +149,6 @@ jobs:
           }
           
           # Copy documentation
-          Copy-Item "README.md" "$artifactDir/" -ErrorAction SilentlyContinue
           Copy-Item "Readme.md" "$artifactDir/" -ErrorAction SilentlyContinue
           Copy-Item "LICENSE" "$artifactDir/" -ErrorAction SilentlyContinue
           Copy-Item "BUILD_WIN64.md" "$artifactDir/" -ErrorAction SilentlyContinue
