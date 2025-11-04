@@ -1,14 +1,36 @@
 # GitHub Actions Workflows
 
-This directory contains GitHub Actions workflows for building and releasing the LiveKit Client C++ SDK.
+This directory contains GitHub Actions workflows for building and releasing the LiveKit Client C++ SDK across multiple platforms.
 
-## Windows Build and Release Workflow
+## Available Workflows
 
+### 1. Multi-Platform Build and Release (Recommended)
+**File**: `multi-platform-release.yml`
+
+Builds the SDK for all supported platforms (Windows, Linux, macOS) and creates a unified release with all artifacts.
+
+### 2. Windows Build and Release
 **File**: `windows-build-release.yml`
+
+Builds the SDK specifically for Windows using a self-hosted runner.
+
+### 3. Linux Build and Release
+**File**: `linux-build-release.yml`
+
+Builds the SDK for Linux (Ubuntu) using GitHub-hosted runners.
+
+### 4. macOS Build and Release
+**File**: `macos-build-release.yml`
+
+Builds the SDK for macOS (Intel and Apple Silicon) using GitHub-hosted runners.
+
+---
+
+## Multi-Platform Workflow (Recommended)
 
 ### Overview
 
-This workflow builds the LiveKit Client C++ SDK on a Windows self-hosted runner and optionally creates a GitHub release with the build artifacts.
+This workflow builds the LiveKit Client C++ SDK for Windows, Linux, and macOS, then creates a unified GitHub release with all platform artifacts.
 
 ### Triggers
 
@@ -34,6 +56,31 @@ The workflow builds the following configurations:
 - **Toolset**: VS2022 (v143)
 
 This produces 2 build artifacts per run.
+
+### Platform Support
+
+| Platform | Runner Type | Architectures | Configurations |
+|----------|-------------|---------------|----------------|
+| Windows  | Self-hosted | x64           | Debug, Release |
+| Linux    | GitHub-hosted | x64         | Debug, Release |
+| macOS    | GitHub-hosted | x86_64, arm64 | Debug, Release |
+
+### Triggers
+
+Same as individual platform workflows:
+- Automatic on version tags (e.g., `v1.0.0`)
+- Manual via workflow_dispatch
+
+### Build Matrix
+
+Total artifacts produced: 8
+- Windows: 2 (Debug, Release)
+- Linux: 2 (Debug, Release)  
+- macOS: 4 (2 configs × 2 architectures)
+
+---
+
+## Windows-Only Workflow
 
 ### Self-Hosted Runner Requirements
 

@@ -1,10 +1,17 @@
 # Workflows Quick Start Guide
 
-## Creating a Release
+## Overview
+
+The LiveKit C++ Client SDK supports automated builds for:
+- **Windows** (x64) - Self-hosted runner
+- **Linux** (x64) - GitHub-hosted runner
+- **macOS** (x86_64 and arm64) - GitHub-hosted runner
+
+## Creating a Multi-Platform Release
 
 ### Option 1: Using Git Tags (Recommended)
 
-The easiest way to create a release is by pushing a version tag:
+The easiest way to create a multi-platform release is by pushing a version tag:
 
 ```bash
 # Create a version tag
@@ -15,10 +22,12 @@ git push origin v1.0.0
 ```
 
 This will automatically:
-1. Build Debug and Release configurations on Windows
-2. Package all artifacts
+1. Build Debug and Release configurations for Windows, Linux, and macOS
+2. Package all artifacts (8 total: 2 Windows, 2 Linux, 4 macOS)
 3. Create a GitHub release with the version tag
 4. Attach all build artifacts to the release
+
+**Note**: By default, pushing a tag triggers the **multi-platform workflow** which builds for all platforms.
 
 ### Option 2: Manual Workflow Dispatch
 
@@ -26,7 +35,11 @@ For testing or creating custom releases:
 
 1. Navigate to your repository on GitHub
 2. Click on the **Actions** tab
-3. Select **Windows Build and Release** from the workflow list
+3. Select the desired workflow:
+   - **Multi-Platform Build and Release** (recommended for full releases)
+   - **Windows Build and Release** (Windows only)
+   - **Linux Build and Release** (Linux only)
+   - **macOS Build and Release** (macOS only)
 4. Click **Run workflow** button
 5. Configure options:
    - **Create a release**: Select "true" if you want a release, "false" for just building
@@ -35,10 +48,23 @@ For testing or creating custom releases:
 
 ## What Gets Built
 
-Each workflow run produces artifacts for:
+### Multi-Platform Workflow
 
-- **Debug (VS2022)**: Development build with debug symbols
-- **Release (VS2022)**: Optimized production build
+Produces 8 artifacts:
+
+**Windows (Self-hosted runner)**
+- Debug and Release with VS2022 (v143)
+
+**Linux (GitHub-hosted: ubuntu-latest)**
+- Debug and Release with GCC
+
+**macOS (GitHub-hosted: macos-latest)**
+- Debug and Release for x86_64 (Intel)
+- Debug and Release for arm64 (Apple Silicon)
+
+### Individual Platform Workflows
+
+Each platform workflow produces 2-4 artifacts depending on the platform.
 
 ## Artifact Contents
 
@@ -61,6 +87,15 @@ Each artifact ZIP contains:
 └── 📄 VERSION.txt                   # Build metadata
 ```
 
+## Choosing the Right Artifact
+
+| Platform | Architecture | Debug | Release |
+|----------|--------------|-------|---------|
+| Windows | x64 | `livekit-client-cpp-windows-x64-Debug.zip` | `livekit-client-cpp-windows-x64-Release.zip` |
+| Linux | x64 | `livekit-client-cpp-linux-x64-Debug.tar.gz` | `livekit-client-cpp-linux-x64-Release.tar.gz` |
+| macOS Intel | x86_64 | `livekit-client-cpp-macos-x86_64-Debug.tar.gz` | `livekit-client-cpp-macos-x86_64-Release.tar.gz` |
+| macOS Apple Silicon | arm64 | `livekit-client-cpp-macos-arm64-Debug.tar.gz` | `livekit-client-cpp-macos-arm64-Release.tar.gz` |
+
 ## Downloading Artifacts
 
 ### From Workflow Run
@@ -68,16 +103,22 @@ Each artifact ZIP contains:
 1. Go to **Actions** tab
 2. Click on a workflow run
 3. Scroll down to **Artifacts** section
-4. Download the desired configuration
+4. Download the desired platform and configuration
 
 ### From Release
 
 1. Go to **Releases** (or **Tags** → select a tag → **Release**)
-2. Download the desired asset from the **Assets** section
+2. Download the appropriate asset for your platform from the **Assets** section
 
 ## Runner Setup (For Repository Maintainers)
 
-The workflow requires a self-hosted Windows runner with:
+### GitHub-Hosted Runners
+
+Linux and macOS builds use GitHub-hosted runners - **no setup required!**
+
+### Self-Hosted Windows Runner
+
+The Windows build requires a self-hosted runner with:
 
 ### Prerequisites
 

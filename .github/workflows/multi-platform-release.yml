@@ -1,0 +1,391 @@
+name: Multi-Platform Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags (e.g., v1.0.0)
+  workflow_dispatch:  # Allow manual triggering
+    inputs:
+      create_release:
+        description: 'Create a release'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      release_tag:
+        description: 'Release tag name (e.g., v1.0.0)'
+        required: false
+        default: ''
+
+jobs:
+  build-windows:
+    name: Build Windows
+    runs-on: [self-hosted, windows]
+    
+    strategy:
+      matrix:
+        config: [Debug, Release]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      
+      - name: Check prerequisites
+        shell: pwsh
+        run: |
+          Write-Host "Checking prerequisites..."
+          if (-not $env:VCPKG_ROOT) {
+            Write-Error "VCPKG_ROOT environment variable is not set"
+            exit 1
+          }
+          cmake --version
+          git --version
+      
+      - name: Configure and build
+        shell: pwsh
+        run: |
+          $buildDir = "out/build/x64-${{ matrix.config }}-v143"
+          cmake -B $buildDir -G Ninja `
+            -DCMAKE_BUILD_TYPE=${{ matrix.config }} `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_OVERLAY_TRIPLETS=cmake/triplets `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-v143 `
+            -DBUILD_EXAMPLES=ON -DBUILD_TEST=ON
+          cmake --build $buildDir --config ${{ matrix.config }}
+      
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          $buildDir = "out/build/x64-${{ matrix.config }}-v143"
+          $artifactName = "livekit-client-cpp-windows-x64-${{ matrix.config }}"
+          $artifactDir = "artifacts/$artifactName"
+          
+          New-Item -ItemType Directory -Force -Path "$artifactDir/lib","$artifactDir/include","$artifactDir/examples","$artifactDir/generated" | Out-Null
+          
+          if (Test-Path "$buildDir/livekitclient.lib") {
+            Copy-Item "$buildDir/livekitclient.lib" "$artifactDir/lib/"
+          }
+          Copy-Item -Recurse "include/*" "$artifactDir/include/"
+          if (Test-Path "$buildDir/generated") {
+            Copy-Item -Recurse "$buildDir/generated/*" "$artifactDir/generated/"
+          }
+          
+          Get-ChildItem "$buildDir/examples" -Recurse -Filter "*.exe" | ForEach-Object {
+            Copy-Item $_.FullName "$artifactDir/examples/"
+          }
+          
+          Copy-Item "LICENSE","Readme.md" "$artifactDir/" -ErrorAction SilentlyContinue
+          
+          "LiveKit Client C++ SDK - Windows x64 - ${{ matrix.config }}" | Out-File "$artifactDir/VERSION.txt"
+          
+          Compress-Archive -Path "$artifactDir/*" -DestinationPath "artifacts/$artifactName.zip" -Force
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-${{ matrix.config }}
+          path: artifacts/*.zip
+          retention-days: 7
+
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        config: [Debug, Release]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build git pkg-config \
+            libssl-dev libwebsockets-dev protobuf-compiler libprotobuf-dev libuv1-dev libabsl-dev
+      
+      - name: Setup vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git /tmp/vcpkg
+          /tmp/vcpkg/bootstrap-vcpkg.sh
+          echo "VCPKG_ROOT=/tmp/vcpkg" >> $GITHUB_ENV
+      
+      - name: Configure and build
+        run: |
+          buildDir="out/build/linux-x64-${{ matrix.config }}"
+          cmake -B "$buildDir" -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.config }} \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+            -DBUILD_EXAMPLES=ON -DBUILD_TEST=ON
+          cmake --build "$buildDir" --config ${{ matrix.config }} -j$(nproc)
+      
+      - name: Package artifacts
+        run: |
+          buildDir="out/build/linux-x64-${{ matrix.config }}"
+          artifactName="livekit-client-cpp-linux-x64-${{ matrix.config }}"
+          artifactDir="artifacts/$artifactName"
+          
+          mkdir -p "$artifactDir"/{lib,include,examples,generated}
+          
+          [ -f "$buildDir/liblivekitclient.a" ] && cp "$buildDir/liblivekitclient.a" "$artifactDir/lib/"
+          cp -r include/* "$artifactDir/include/"
+          [ -d "$buildDir/generated" ] && cp -r "$buildDir/generated"/* "$artifactDir/generated/"
+          
+          find "$buildDir/examples" -type f -executable -exec cp {} "$artifactDir/examples/" \;
+          
+          cp LICENSE Readme.md "$artifactDir/" 2>/dev/null || true
+          echo "LiveKit Client C++ SDK - Linux x64 - ${{ matrix.config }}" > "$artifactDir/VERSION.txt"
+          
+          cd artifacts && tar -czf "$artifactName.tar.gz" "$artifactName"
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64-${{ matrix.config }}
+          path: artifacts/*.tar.gz
+          retention-days: 7
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    
+    strategy:
+      matrix:
+        config: [Debug, Release]
+        arch: [x86_64, arm64]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install cmake ninja pkg-config openssl@3 libwebsockets protobuf libuv abseil
+      
+      - name: Setup vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git /tmp/vcpkg
+          /tmp/vcpkg/bootstrap-vcpkg.sh
+          echo "VCPKG_ROOT=/tmp/vcpkg" >> $GITHUB_ENV
+      
+      - name: Configure and build
+        run: |
+          buildDir="out/build/macos-${{ matrix.arch }}-${{ matrix.config }}"
+          
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            CMAKE_ARCH_FLAGS="-DCMAKE_OSX_ARCHITECTURES=arm64"
+          else
+            CMAKE_ARCH_FLAGS="-DCMAKE_OSX_ARCHITECTURES=x86_64"
+          fi
+          
+          cmake -B "$buildDir" -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.config }} \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+            $CMAKE_ARCH_FLAGS \
+            -DBUILD_EXAMPLES=ON -DBUILD_TEST=ON
+          cmake --build "$buildDir" --config ${{ matrix.config }} -j$(sysctl -n hw.ncpu)
+      
+      - name: Package artifacts
+        run: |
+          buildDir="out/build/macos-${{ matrix.arch }}-${{ matrix.config }}"
+          artifactName="livekit-client-cpp-macos-${{ matrix.arch }}-${{ matrix.config }}"
+          artifactDir="artifacts/$artifactName"
+          
+          mkdir -p "$artifactDir"/{lib,include,examples,generated}
+          
+          [ -f "$buildDir/liblivekitclient.a" ] && cp "$buildDir/liblivekitclient.a" "$artifactDir/lib/"
+          cp -r include/* "$artifactDir/include/"
+          [ -d "$buildDir/generated" ] && cp -r "$buildDir/generated"/* "$artifactDir/generated/"
+          
+          find "$buildDir/examples" -type f -perm +111 -exec cp {} "$artifactDir/examples/" \;
+          
+          cp LICENSE Readme.md "$artifactDir/" 2>/dev/null || true
+          echo "LiveKit Client C++ SDK - macOS ${{ matrix.arch }} - ${{ matrix.config }}" > "$artifactDir/VERSION.txt"
+          
+          cd artifacts && tar -czf "$artifactName.tar.gz" "$artifactName"
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-${{ matrix.config }}
+          path: artifacts/*.tar.gz
+          retention-days: 7
+
+  create-release:
+    name: Create Multi-Platform Release
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Determine release tag
+        id: release_tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ -n "${{ github.event.inputs.release_tag }}" ]]; then
+              echo "tag=${{ github.event.inputs.release_tag }}" >> $GITHUB_OUTPUT
+            else
+              echo "tag=multi-platform-$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+      
+      - name: Organize artifacts
+        shell: bash
+        run: |
+          mkdir -p final-artifacts
+          find release-artifacts -type f \( -name "*.zip" -o -name "*.tar.gz" \) -exec cp {} final-artifacts/ \;
+          echo "Final artifacts:"
+          ls -lh final-artifacts/
+      
+      - name: Generate release notes
+        shell: bash
+        run: |
+          cat > release-notes.md << 'EOF'
+          # LiveKit Client C++ SDK - Multi-Platform Release
+          
+          ## Build Information
+          - **Release Tag**: ${{ steps.release_tag.outputs.tag }}
+          - **Build Date**: $(date -u "+%Y-%m-%d %H:%M:%S UTC")
+          - **Commit**: ${{ github.sha }}
+          
+          ## Supported Platforms
+          
+          This release includes builds for:
+          
+          ### Windows (x64)
+          - Debug and Release configurations
+          - Built with Visual Studio 2022 (v143 toolset)
+          - Format: ZIP archives
+          
+          ### Linux (x64)
+          - Debug and Release configurations
+          - Built on Ubuntu with GCC
+          - Format: tar.gz archives
+          
+          ### macOS
+          - Debug and Release configurations
+          - Intel (x86_64) and Apple Silicon (arm64) architectures
+          - Format: tar.gz archives
+          
+          ## Artifacts
+          
+          Each platform artifact includes:
+          - Static library (`.lib` for Windows, `.a` for Unix-like systems)
+          - Public header files
+          - Generated Protocol Buffer headers
+          - Example executables
+          - Documentation
+          
+          ## Download Guide
+          
+          Choose the appropriate artifact for your platform and build configuration:
+          
+          - **Windows**: `livekit-client-cpp-windows-x64-{Debug|Release}.zip`
+          - **Linux**: `livekit-client-cpp-linux-x64-{Debug|Release}.tar.gz`
+          - **macOS Intel**: `livekit-client-cpp-macos-x86_64-{Debug|Release}.tar.gz`
+          - **macOS Apple Silicon**: `livekit-client-cpp-macos-arm64-{Debug|Release}.tar.gz`
+          
+          ## Usage
+          
+          ### Windows
+          ```cmd
+          :: Extract the ZIP file
+          :: Link livekitclient.lib to your application
+          :: Include headers from include/ directory
+          ```
+          
+          ### Linux/macOS
+          ```bash
+          # Extract the archive
+          tar -xzf livekit-client-cpp-{platform}-{arch}-{Config}.tar.gz
+          
+          # Link liblivekitclient.a to your application
+          # Include headers from include/ directory
+          ```
+          
+          ## Requirements
+          
+          ### Windows
+          - Visual Studio 2022 or compatible
+          - Windows 10/11 (64-bit)
+          
+          ### Linux
+          - GCC with C++20 support
+          - Ubuntu 20.04+ or equivalent
+          - System dependencies: libssl, libwebsockets, protobuf, libuv, abseil
+          
+          ### macOS
+          - macOS 11.0 or later
+          - Xcode Command Line Tools
+          - Homebrew dependencies: openssl, libwebsockets, protobuf, libuv, abseil
+          
+          ## Dependencies
+          
+          All builds depend on:
+          - WebRTC
+          - Protocol Buffers
+          - libwebsockets
+          - OpenSSL
+          - Abseil C++
+          - libuv
+          
+          ## Documentation
+          
+          - [Windows Build Guide](BUILD_WIN64.md)
+          - [Main README](Readme.md)
+          
+          ## Support
+          
+          For issues, questions, or contributions, please visit the repository.
+          EOF
+          
+          echo "Release notes generated"
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          name: Release ${{ steps.release_tag.outputs.tag }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          files: |
+            final-artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Release summary
+        shell: bash
+        run: |
+          echo "✓ Multi-platform release created successfully!"
+          echo "Release tag: ${{ steps.release_tag.outputs.tag }}"
+          echo "View release at: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.release_tag.outputs.tag }}"
+          echo ""
+          echo "Included platforms:"
+          echo "  - Windows (x64): Debug, Release"
+          echo "  - Linux (x64): Debug, Release"
+          echo "  - macOS (x86_64, arm64): Debug, Release"
