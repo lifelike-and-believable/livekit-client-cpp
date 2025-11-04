@@ -30,6 +30,25 @@ Because webrtc requires C++20.
 - [nlohmann_json](https://github.com/nlohmann/json) (as submodule by default)
 - [dr_libs](https://github.com/mackron/dr_libs) (as submodule by default for examples)
 
+## Building
+
+### Windows 64-bit
+
+📚 **Documentation**:
+- [QUICKSTART_WIN64.md](./QUICKSTART_WIN64.md) - Quick reference guide
+- [BUILD_WIN64.md](./BUILD_WIN64.md) - Complete step-by-step instructions
+
+**Quick start**:
+```powershell
+# Install prerequisites: Visual Studio 2019/2022, vcpkg, CMake, Git
+# Set VCPKG_ROOT environment variable
+
+# Clone and build
+git clone --recurse-submodules https://github.com/lifelike-and-believable/livekit-client-cpp.git
+cd livekit-client-cpp
+.\build-win64.ps1  # or build-win64.bat for cmd
+```
+
 ## Examples
 
 See [examples](./examples/)
