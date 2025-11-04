@@ -35,11 +35,7 @@ jobs:
             $_ -notlike 'C:\mingw*'
           }
           "PATH=$($paths -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          @'
-INCLUDE=
-LIB=
-LIBPATH=
-'@ | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "INCLUDE=`nLIB=`nLIBPATH=`n" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Verify toolchain
         shell: pwsh
@@ -69,7 +65,6 @@ LIBPATH=
       - name: Build (Release)
         run: cmake --build build -- -v
 
-      # Optional: upload artifacts — adjust paths to your outputs if needed
       - name: Upload build artifacts
         if: success()
         uses: actions/upload-artifact@v4
