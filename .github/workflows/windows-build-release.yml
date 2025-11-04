@@ -3,92 +3,51 @@ name: Windows Build and Release
 on:
   push:
     branches: [ main ]
-    tags: [ "v*" ]
   pull_request:
     branches: [ main ]
 
 jobs:
-  windows-msvc-build:
-    name: Windows (MSVC) Build
-    runs-on: windows-2022
+  build:
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
-          fetch-depth: 0
 
-      - name: Set up MSVC dev shell (VS 2022 x64)
+      - name: Set up MSVC (VS 2022)
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Install Ninja
-        shell: pwsh
-        run: choco install ninja -y
-
+      # Minimal, reliable vcpkg setup (replaces the broken actions/setup-vcpkg)
       - name: Set up vcpkg
-        uses: microsoft/setup-vcpkg@v1
+        uses: johnwason/setup-vcpkg@v1
         with:
-          vcpkgTriplet: x64-windows
-          cacheEnabled: true
+          # Optionally pin a known-good vcpkg commit/ref
+          # vcpkgGitRef: '2024.08.23'
+          disableMetrics: true
 
-      - name: Install vcpkg dependencies
-        shell: pwsh
-        run: |
-          vcpkg install libwebsockets:x64-windows libuv:x64-windows openssl:x64-windows zlib:x64-windows
-
-      - name: Purge Strawberry/MSYS/MinGW from environment
-        shell: pwsh
-        run: |
-          $paths = $env:PATH -split ';' | Where-Object {
-            $_ -and
-            $_ -notlike 'C:\Strawberry*' -and
-            $_ -notlike 'C:\msys*' -and
-            $_ -notlike 'C:\mingw*'
-          }
-          "PATH=$($paths -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          # Do not clear INCLUDE/LIB/LIBPATH; MSVC/Windows SDK need these.
-
-      - name: Verify toolchain
-        shell: pwsh
-        run: |
-          Write-Host "cl location:"
-          where cl
-          Write-Host "`ncl version:"
-          cmd /c "cl" 2>&1 | Select-String -Pattern 'Version' -CaseSensitive:$false
-          Write-Host "`ncmake version:"
-          cmake --version
-          Write-Host "`nninja version:"
-          ninja --version
-          Write-Host "`nvcpkg root:"
-          Write-Host $env:VCPKG_ROOT
-
-      - name: Configure (CMake + Ninja, MSVC, C++20)
+      # If your repo uses vcpkg manifest (vcpkg.json), CMake will auto-use it when toolchain is set.
+      - name: Configure (CMake + vcpkg toolchain)
         shell: pwsh
         run: >
-          cmake -S . -B build -G "Ninja"
-          -DCMAKE_C_COMPILER=cl
-          -DCMAKE_CXX_COMPILER=cl
-          -DCMAKE_CXX_STANDARD=20
+          cmake -S . -B build
+          -DCMAKE_TOOLCHAIN_FILE="${env:VCPKG_ROOT}\scripts\buildsystems\vcpkg.cmake"
           -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
-          -DVCPKG_TARGET_TRIPLET=x64-windows
 
-      - name: Print selected compilers
+      - name: Build
         shell: pwsh
-        run: |
-          cmake -LA -N build | Select-String -Pattern 'CMAKE_CXX_COMPILER|CMAKE_C_COMPILER|CMAKE_CXX_COMPILER_ID|CMAKE_C_STANDARD|CMAKE_CXX_STANDARD'
+        run: cmake --build build --config Release
 
-      - name: Build (Release)
-        run: cmake --build build -- -v
-
-      - name: Upload build artifacts
+      - name: Install/Package
         if: success()
+        shell: pwsh
+        run: cmake --install build --config Release --prefix "$env:RUNNER_TEMP\dist"
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-msvc-build-release
-          path: |
-            build/**
-          if-no-files-found: warn
+          name: windows-release
+          path: ${{ runner.temp }}\dist
