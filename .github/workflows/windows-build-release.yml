@@ -21,7 +21,11 @@ jobs:
         with:
           arch: x64
 
-      - name: Purge Strawberry and other GNU toolchains from environment
+      - name: Install Ninja
+        shell: pwsh
+        run: choco install ninja -y
+
+      - name: Purge Strawberry/MSYS/MinGW from environment
         shell: pwsh
         run: |
           $paths = $env:PATH -split ';' | Where-Object {
@@ -43,7 +47,7 @@ LIBPATH=
           Write-Host "cl location:"
           where cl
           Write-Host "`ncl version:"
-          cmd /c "cl 2>&1 | findstr -i 'version'"
+          cmd /c "cl" 2>&1 | Select-String -Pattern 'Version' -CaseSensitive:$false
           Write-Host "`ncmake version:"
           cmake --version
           Write-Host "`nninja version:"
@@ -58,13 +62,14 @@ LIBPATH=
           -DCMAKE_BUILD_TYPE=Release
 
       - name: Print selected compilers
+        shell: pwsh
         run: |
-          cmake -LA -N build | findstr /I "CMAKE_CXX_COMPILER CMAKE_C_COMPILER CMAKE_CXX_COMPILER_ID CMAKE_C_STANDARD CMAKE_CXX_STANDARD"
+          cmake -LA -N build | Select-String -Pattern 'CMAKE_CXX_COMPILER|CMAKE_C_COMPILER|CMAKE_CXX_COMPILER_ID|CMAKE_C_STANDARD|CMAKE_CXX_STANDARD'
 
       - name: Build (Release)
-        run: cmake --build build --config Release -- -v
+        run: cmake --build build -- -v
 
-      # Optional: upload artifacts — customize paths as needed
+      # Optional: upload artifacts — adjust paths to your outputs if needed
       - name: Upload build artifacts
         if: success()
         uses: actions/upload-artifact@v4
