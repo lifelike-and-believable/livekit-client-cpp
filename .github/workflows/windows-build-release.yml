@@ -2,350 +2,74 @@ name: Windows Build and Release
 
 on:
   push:
-    tags:
-      - 'v*'  # Trigger on version tags (e.g., v1.0.0)
-  workflow_dispatch:  # Allow manual triggering
-    inputs:
-      create_release:
-        description: 'Create a release'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'true'
-          - 'false'
-      release_tag:
-        description: 'Release tag name (e.g., v1.0.0)'
-        required: false
-        default: ''
+    branches: [ main ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  build-windows:
-    name: Build on Windows
-    runs-on: [self-hosted, windows]
-    
-    permissions:
-      contents: read
-    
-    strategy:
-      matrix:
-        config: [Debug, Release]
-        toolset: [v143]  # VS2022
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+  windows-msvc-build:
+    name: Windows (MSVC) Build
+    runs-on: windows-2022
 
-      # Ensure vcpkg is available and VCPKG_ROOT is set for subsequent steps
-      - name: Setup vcpkg (self-hosted)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC dev shell (VS 2022 x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Purge Strawberry and other GNU toolchains from environment
         shell: pwsh
         run: |
-          if (-not $env:VCPKG_ROOT) {
-            $vcpkgRoot = "$env:USERPROFILE\vcpkg"
-            if (-not (Test-Path $vcpkgRoot)) {
-              Write-Host "Cloning vcpkg into $vcpkgRoot..."
-              git clone https://github.com/microsoft/vcpkg $vcpkgRoot
-            } else {
-              Write-Host "vcpkg already present at $vcpkgRoot"
-            }
-            Write-Host "Bootstrapping vcpkg..."
-            & "$vcpkgRoot\bootstrap-vcpkg.bat"
-            "VCPKG_ROOT=$vcpkgRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            Write-Host "✓ Set VCPKG_ROOT to $vcpkgRoot"
-          } else {
-            Write-Host "✓ VCPKG_ROOT already set to $env:VCPKG_ROOT"
+          $paths = $env:PATH -split ';' | Where-Object {
+            $_ -and
+            $_ -notlike 'C:\Strawberry*' -and
+            $_ -notlike 'C:\msys*' -and
+            $_ -notlike 'C:\mingw*'
           }
-      
-      - name: Check prerequisites
+          "PATH=$($paths -join ';')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          @'
+INCLUDE=
+LIB=
+LIBPATH=
+'@ | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Verify toolchain
         shell: pwsh
         run: |
-          Write-Host "Checking prerequisites..."
-          
-          # Check VCPKG_ROOT
-          if (-not $env:VCPKG_ROOT) {
-            Write-Error "VCPKG_ROOT environment variable is not set"
-            exit 1
-          }
-          Write-Host "✓ VCPKG_ROOT: $env:VCPKG_ROOT"
-          
-          # Check CMake
+          Write-Host "cl location:"
+          where cl
+          Write-Host "`ncl version:"
+          cmd /c "cl 2>&1 | findstr -i 'version'"
+          Write-Host "`ncmake version:"
           cmake --version
-          Write-Host "✓ CMake found"
-          
-          # Check Git
-          git --version
-          Write-Host "✓ Git found"
-          
-          # Check Ninja
-          try {
-            ninja --version
-            Write-Host "✓ Ninja found"
-          } catch {
-            Write-Warning "Ninja not found, will use default generator"
-          }
-      
-      - name: Configure project
-        shell: pwsh
+          Write-Host "`nninja version:"
+          ninja --version
+
+      - name: Configure (CMake + Ninja, MSVC, C++20)
+        run: >
+          cmake -S . -B build -G "Ninja"
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_CXX_STANDARD=20
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Print selected compilers
         run: |
-          $buildDir = "out/build/x64-${{ matrix.config }}-${{ matrix.toolset }}"
-          $triplet = "x64-windows-${{ matrix.toolset }}"
-          
-          Write-Host "Configuring build..."
-          Write-Host "  Configuration: ${{ matrix.config }}"
-          Write-Host "  Toolset: ${{ matrix.toolset }}"
-          Write-Host "  Build Directory: $buildDir"
+          cmake -LA -N build | findstr /I "CMAKE_CXX_COMPILER CMAKE_C_COMPILER CMAKE_CXX_COMPILER_ID CMAKE_C_STANDARD CMAKE_CXX_STANDARD"
 
-          # Choose generator: prefer Ninja if available, otherwise VS 2022
-          $generator = $null
-          try {
-            ninja --version | Out-Null
-            $generator = "Ninja Multi-Config"
-          } catch {
-            $generator = "Visual Studio 17 2022"
-          }
-          Write-Host "  Generator: $generator"
+      - name: Build (Release)
+        run: cmake --build build --config Release -- -v
 
-          $cmakeArgs = @(
-            "-B", $buildDir,
-            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake",
-            "-DVCPKG_OVERLAY_TRIPLETS=cmake/triplets",
-            "-DVCPKG_TARGET_TRIPLET=$triplet",
-            "-DBUILD_EXAMPLES=ON",
-            "-DBUILD_TEST=ON"
-          )
-
-          if ($generator) {
-            $cmakeArgs += @("-G", $generator)
-          }
-
-          # For multi-config generators (VS, Ninja Multi-Config), --config is used at build time.
-          # Keep CMAKE_BUILD_TYPE for single-config cases; harmless otherwise.
-          $cmakeArgs += @("-DCMAKE_BUILD_TYPE=${{ matrix.config }}")
-
-          if ($generator -like "Visual Studio*") {
-            $cmakeArgs += @("-A", "x64", "-T", "${{ matrix.toolset }}")
-          }
-
-          cmake @cmakeArgs
-          
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "CMake configuration failed"
-            exit 1
-          }
-      
-      - name: Build project
-        shell: pwsh
-        run: |
-          $buildDir = "out/build/x64-${{ matrix.config }}-${{ matrix.toolset }}"
-          
-          Write-Host "Building project..."
-          cmake --build $buildDir --config ${{ matrix.config }}
-          
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Build failed"
-            exit 1
-          }
-          
-          Write-Host "Build completed successfully!"
-      
-      - name: Package build artifacts
-        shell: pwsh
-        run: |
-          $buildDir = "out/build/x64-${{ matrix.config }}-${{ matrix.toolset }}"
-          $artifactName = "livekit-client-cpp-windows-x64-${{ matrix.config }}-${{ matrix.toolset }}"
-          $artifactDir = "artifacts/$artifactName"
-          
-          Write-Host "Packaging artifacts..."
-          
-          # Create artifact directory structure
-          New-Item -ItemType Directory -Force -Path "$artifactDir/lib" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$artifactDir/include" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$artifactDir/examples" | Out-Null
-          New-Item -ItemType Directory -Force -Path "$artifactDir/generated" | Out-Null
-          
-          # Copy library
-          if (Test-Path "$buildDir/livekitclient.lib") {
-            Copy-Item "$buildDir/livekitclient.lib" "$artifactDir/lib/"
-            Write-Host "✓ Copied livekitclient.lib"
-          }
-          
-          # Copy headers
-          Copy-Item -Recurse "include/*" "$artifactDir/include/"
-          Write-Host "✓ Copied include files"
-          
-          # Copy generated protocol buffer headers
-          if (Test-Path "$buildDir/generated") {
-            Copy-Item -Recurse "$buildDir/generated/*" "$artifactDir/generated/"
-            Write-Host "✓ Copied generated protobuf files"
-          }
-          
-          # Copy example executables
-          if (Test-Path "$buildDir/examples/cpp_sample/cpp_sample.exe") {
-            Copy-Item "$buildDir/examples/cpp_sample/cpp_sample.exe" "$artifactDir/examples/"
-            Write-Host "✓ Copied cpp_sample.exe"
-          }
-          if (Test-Path "$buildDir/examples/room_event/room_event.exe") {
-            Copy-Item "$buildDir/examples/room_event/room_event.exe" "$artifactDir/examples/"
-            Write-Host "✓ Copied room_event.exe"
-          }
-          if (Test-Path "$buildDir/examples/publish_audio/publish_audio.exe") {
-            Copy-Item "$buildDir/examples/publish_audio/publish_audio.exe" "$artifactDir/examples/"
-            Write-Host "✓ Copied publish_audio.exe"
-          }
-          
-          # Copy documentation
-          Copy-Item "Readme.md" "$artifactDir/" -ErrorAction SilentlyContinue
-          Copy-Item "LICENSE" "$artifactDir/" -ErrorAction SilentlyContinue
-          Copy-Item "BUILD_WIN64.md" "$artifactDir/" -ErrorAction SilentlyContinue
-          Copy-Item "QUICKSTART_WIN64.md" "$artifactDir/" -ErrorAction SilentlyContinue
-          
-          # Create a VERSION.txt file with build info
-          "LiveKit Client C++ SDK" | Out-File -FilePath "$artifactDir/VERSION.txt" -Encoding UTF8
-          "Build Configuration: ${{ matrix.config }}" | Out-File -FilePath "$artifactDir/VERSION.txt" -Encoding UTF8 -Append
-          "Toolset: ${{ matrix.toolset }}" | Out-File -FilePath "$artifactDir/VERSION.txt" -Encoding UTF8 -Append
-          "Build Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')" | Out-File -FilePath "$artifactDir/VERSION.txt" -Encoding UTF8 -Append
-          "Git Commit: ${{ github.sha }}" | Out-File -FilePath "$artifactDir/VERSION.txt" -Encoding UTF8 -Append
-          "Git Ref: ${{ github.ref }}" | Out-File -FilePath "$artifactDir/VERSION.txt" -Encoding UTF8 -Append
-          
-          # Create ZIP archive
-          Compress-Archive -Path "$artifactDir/*" -DestinationPath "artifacts/$artifactName.zip" -Force
-          Write-Host "✓ Created ZIP archive: $artifactName.zip"
-          
-          # List artifact contents
-          Write-Host "`nArtifact contents:"
-          Get-ChildItem -Recurse "$artifactDir" | Select-Object FullName
-      
+      # Optional: upload artifacts — customize paths as needed
       - name: Upload build artifacts
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: livekit-client-cpp-windows-x64-${{ matrix.config }}-${{ matrix.toolset }}
-          path: artifacts/livekit-client-cpp-windows-x64-${{ matrix.config }}-${{ matrix.toolset }}.zip
-          retention-days: 30
-      
-      - name: Upload artifacts for release
-        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-artifacts-${{ matrix.config }}-${{ matrix.toolset }}
-          path: artifacts/*.zip
-          retention-days: 7
-
-  create-release:
-    name: Create GitHub Release
-    needs: build-windows
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
-    
-    permissions:
-      contents: write
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Determine release tag
-        id: release_tag
-        shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            if [[ -n "${{ github.event.inputs.release_tag }}" ]]; then
-              echo "tag=${{ github.event.inputs.release_tag }}" >> $GITHUB_OUTPUT
-            else
-              echo "tag=manual-$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: Download all release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: release-artifacts-*
-          path: release-artifacts
-          merge-multiple: true
-      
-      - name: List downloaded artifacts
-        shell: bash
-        run: |
-          echo "Downloaded artifacts:"
-          ls -lah release-artifacts/
-      
-      - name: Generate release notes
-        id: release_notes
-        shell: bash
-        run: |
-          cat > release-notes.md << 'EOF'
-          # LiveKit Client C++ SDK Release
-          
-          ## Build Information
-          - **Platform**: Windows x64
-          - **Build Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          - **Commit**: ${{ github.sha }}
-          
-          ## Included Artifacts
-          
-          This release includes the following build configurations:
-          
-          - **Debug (VS2022/v143)**: Development build with debug symbols
-          - **Release (VS2022/v143)**: Optimized production build
-          
-          Each artifact contains:
-          - Static library (`livekitclient.lib`)
-          - Header files (`include/` directory)
-          - Generated protobuf files (`generated/` directory)
-          - Example executables (`examples/` directory)
-          - Documentation (README, LICENSE, build guides)
-          
-          ## Usage
-          
-          1. Download the appropriate artifact for your build configuration
-          2. Extract the ZIP file
-          3. Link `livekitclient.lib` to your application
-          4. Include headers from the `include/` directory
-          5. Refer to the examples for usage guidance
-          
-          ## Requirements
-          
-          - Visual Studio 2022 (v143 toolset)
-          - Windows 10 or later (64-bit)
-          - CMake 3.11 or later
-          
-          ## Documentation
-          
-          - [Build Guide](BUILD_WIN64.md)
-          - [Quick Start](QUICKSTART_WIN64.md)
-          - [Main README](Readme.md)
-          
-          ## Dependencies
-          
-          This SDK depends on:
-          - WebRTC
-          - Protocol Buffers
-          - libwebsockets
-          - OpenSSL
-          - Abseil C++
-          - libuv
-          EOF
-          
-          echo "Release notes generated"
-      
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.release_tag.outputs.tag }}
-          name: Release ${{ steps.release_tag.outputs.tag }}
-          body_path: release-notes.md
-          draft: false
-          prerelease: false
-          files: |
-            release-artifacts/*.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Release created
-        shell: bash
-        run: |
-          echo "✓ Release created successfully: ${{ steps.release_tag.outputs.tag }}"
-          echo "View release at: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.release_tag.outputs.tag }}"
+          name: windows-msvc-build-release
+          path: |
+            build/**
+          if-no-files-found: warn
