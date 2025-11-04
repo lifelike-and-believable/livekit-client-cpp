@@ -1,0 +1,310 @@
+name: macOS Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags (e.g., v1.0.0)
+  workflow_dispatch:  # Allow manual triggering
+    inputs:
+      create_release:
+        description: 'Create a release'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  build-macos:
+    name: Build on macOS
+    runs-on: macos-latest
+    
+    permissions:
+      contents: read
+    
+    strategy:
+      matrix:
+        config: [Debug, Release]
+        arch: [x86_64, arm64]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install \
+            cmake \
+            ninja \
+            pkg-config \
+            openssl@3 \
+            libwebsockets \
+            protobuf \
+            libuv \
+            abseil
+          
+          echo "✓ Dependencies installed"
+      
+      - name: Verify installations
+        run: |
+          echo "CMake version:"
+          cmake --version
+          
+          echo -e "\nClang version:"
+          clang --version
+          
+          echo -e "\nNinja version:"
+          ninja --version
+          
+          echo -e "\nProtobuf version:"
+          protoc --version
+          
+          echo -e "\nArchitecture:"
+          uname -m
+      
+      - name: Setup vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git /tmp/vcpkg
+          /tmp/vcpkg/bootstrap-vcpkg.sh
+          echo "VCPKG_ROOT=/tmp/vcpkg" >> $GITHUB_ENV
+          echo "✓ vcpkg installed"
+      
+      - name: Configure project
+        run: |
+          buildDir="out/build/macos-${{ matrix.arch }}-${{ matrix.config }}"
+          
+          echo "Configuring build..."
+          echo "  Configuration: ${{ matrix.config }}"
+          echo "  Architecture: ${{ matrix.arch }}"
+          echo "  Build Directory: $buildDir"
+          
+          # Set architecture-specific flags
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            CMAKE_ARCH_FLAGS="-DCMAKE_OSX_ARCHITECTURES=arm64"
+          else
+            CMAKE_ARCH_FLAGS="-DCMAKE_OSX_ARCHITECTURES=x86_64"
+          fi
+          
+          cmake -B "$buildDir" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.config }} \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+            $CMAKE_ARCH_FLAGS \
+            -DBUILD_EXAMPLES=ON \
+            -DBUILD_TEST=ON
+          
+          echo "✓ Configuration completed"
+      
+      - name: Build project
+        run: |
+          buildDir="out/build/macos-${{ matrix.arch }}-${{ matrix.config }}"
+          
+          echo "Building project..."
+          cmake --build "$buildDir" --config ${{ matrix.config }} -j$(sysctl -n hw.ncpu)
+          
+          echo "✓ Build completed successfully!"
+      
+      - name: Package build artifacts
+        run: |
+          buildDir="out/build/macos-${{ matrix.arch }}-${{ matrix.config }}"
+          artifactName="livekit-client-cpp-macos-${{ matrix.arch }}-${{ matrix.config }}"
+          artifactDir="artifacts/$artifactName"
+          
+          echo "Packaging artifacts..."
+          
+          # Create artifact directory structure
+          mkdir -p "$artifactDir"/{lib,include,examples,generated}
+          
+          # Copy library
+          if [ -f "$buildDir/liblivekitclient.a" ]; then
+            cp "$buildDir/liblivekitclient.a" "$artifactDir/lib/"
+            echo "✓ Copied liblivekitclient.a"
+          fi
+          
+          # Copy headers
+          cp -r include/* "$artifactDir/include/"
+          echo "✓ Copied include files"
+          
+          # Copy generated protocol buffer headers
+          if [ -d "$buildDir/generated" ]; then
+            cp -r "$buildDir/generated"/* "$artifactDir/generated/"
+            echo "✓ Copied generated protobuf files"
+          fi
+          
+          # Copy example executables
+          if [ -f "$buildDir/examples/cpp_sample/cpp_sample" ]; then
+            cp "$buildDir/examples/cpp_sample/cpp_sample" "$artifactDir/examples/"
+            chmod +x "$artifactDir/examples/cpp_sample"
+            echo "✓ Copied cpp_sample"
+          fi
+          if [ -f "$buildDir/examples/room_event/room_event" ]; then
+            cp "$buildDir/examples/room_event/room_event" "$artifactDir/examples/"
+            chmod +x "$artifactDir/examples/room_event"
+            echo "✓ Copied room_event"
+          fi
+          if [ -f "$buildDir/examples/publish_audio/publish_audio" ]; then
+            cp "$buildDir/examples/publish_audio/publish_audio" "$artifactDir/examples/"
+            chmod +x "$artifactDir/examples/publish_audio"
+            echo "✓ Copied publish_audio"
+          fi
+          
+          # Copy documentation
+          cp Readme.md "$artifactDir/" 2>/dev/null || true
+          cp LICENSE "$artifactDir/" 2>/dev/null || true
+          
+          # Create a VERSION.txt file with build info
+          cat > "$artifactDir/VERSION.txt" << EOF
+          LiveKit Client C++ SDK
+          Platform: macOS
+          Architecture: ${{ matrix.arch }}
+          Build Configuration: ${{ matrix.config }}
+          Build Date: $(date -u "+%Y-%m-%d %H:%M:%S UTC")
+          Git Commit: ${{ github.sha }}
+          Git Ref: ${{ github.ref }}
+          EOF
+          
+          # Create tar.gz archive
+          cd artifacts
+          tar -czf "$artifactName.tar.gz" "$artifactName"
+          echo "✓ Created tar.gz archive: $artifactName.tar.gz"
+          
+          # List artifact contents
+          echo -e "\nArtifact contents:"
+          find "$artifactName" -type f
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: livekit-client-cpp-macos-${{ matrix.arch }}-${{ matrix.config }}
+          path: artifacts/livekit-client-cpp-macos-${{ matrix.arch }}-${{ matrix.config }}.tar.gz
+          retention-days: 30
+      
+      - name: Upload artifacts for release
+        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-macos-${{ matrix.arch }}-${{ matrix.config }}
+          path: artifacts/*.tar.gz
+          retention-days: 7
+
+  create-release:
+    name: Create GitHub Release
+    needs: build-macos
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Determine release tag
+        id: release_tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=macos-manual-$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-artifacts-macos-*
+          path: release-artifacts
+          merge-multiple: true
+      
+      - name: List downloaded artifacts
+        shell: bash
+        run: |
+          echo "Downloaded artifacts:"
+          ls -lah release-artifacts/
+      
+      - name: Generate release notes
+        id: release_notes
+        shell: bash
+        run: |
+          cat > release-notes.md << 'EOF'
+          # LiveKit Client C++ SDK - macOS Release
+          
+          ## Build Information
+          - **Platform**: macOS
+          - **Architectures**: x86_64 (Intel), arm64 (Apple Silicon)
+          - **Build Date**: $(date -u "+%Y-%m-%d %H:%M:%S UTC")
+          - **Commit**: ${{ github.sha }}
+          
+          ## Included Artifacts
+          
+          This release includes the following build configurations:
+          
+          - **Debug (x86_64)**: Development build for Intel Macs
+          - **Release (x86_64)**: Optimized build for Intel Macs
+          - **Debug (arm64)**: Development build for Apple Silicon Macs
+          - **Release (arm64)**: Optimized build for Apple Silicon Macs
+          
+          Each artifact contains:
+          - Static library (`liblivekitclient.a`)
+          - Header files (`include/` directory)
+          - Generated protobuf files (`generated/` directory)
+          - Example executables (`examples/` directory)
+          - Documentation (README, LICENSE)
+          
+          ## Usage
+          
+          1. Download the appropriate artifact for your architecture and build configuration
+          2. Extract the tar.gz file: `tar -xzf livekit-client-cpp-macos-{arch}-{Config}.tar.gz`
+          3. Link `liblivekitclient.a` to your application
+          4. Include headers from the `include/` directory
+          5. Refer to the examples for usage guidance
+          
+          ## Architecture Selection
+          
+          - **arm64**: For Apple Silicon Macs (M1, M2, M3, etc.)
+          - **x86_64**: For Intel-based Macs
+          - To check your architecture: `uname -m`
+          
+          ## Requirements
+          
+          - macOS 11.0 or later
+          - Xcode Command Line Tools with C++20 support
+          - CMake 3.11 or later
+          - System dependencies: openssl, libwebsockets, protobuf, libuv, abseil (via Homebrew)
+          
+          ## Dependencies
+          
+          This SDK depends on:
+          - WebRTC
+          - Protocol Buffers
+          - libwebsockets
+          - OpenSSL
+          - Abseil C++
+          - libuv
+          EOF
+          
+          echo "Release notes generated"
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          name: macOS Release ${{ steps.release_tag.outputs.tag }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          files: |
+            release-artifacts/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Release created
+        shell: bash
+        run: |
+          echo "✓ Release created successfully: ${{ steps.release_tag.outputs.tag }}"
+          echo "View release at: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.release_tag.outputs.tag }}"
